@@ -1,0 +1,4 @@
+qiskit
+bqskit
+qiskit-nature[pyscf]
+qiskit-aer
