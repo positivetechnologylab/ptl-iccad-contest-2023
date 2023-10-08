@@ -54,40 +54,52 @@ from qiskit.providers.fake_provider import *
 # Used for reading noise model files
 import pickle
 
-def performWorkflow(noisemodel_name, seed):
+# Define a function for parsing the Hamiltonian string into a list of
+# Pauli strings.
+def parse_hamiltonian(content: str):
     """
-    Performs the entire circuit generation and synthesis workflow for a given
-    noise model and seed.
+    Parses the input Hamiltonian string and returns a list of Pauli strings
+    padded for a circuit with 27 qubits with their coefficients.
 
     Args:
-    noisemodel_name (str): The name of the noise model to use when evaluating
-    the resulting ansatz. noisemodel_name MUST be one of 'fakecairo.pkl', 'fakekolkata.pkl',
-    and 'fakemontreal.pkl'.
-    seed (int): The seed to use throughout the workflow.
+    content (str): The string representation of the Hamiltonian to parse.
+    It is assumed that the file contains one Pauli coefficient and string per
+    line, and each line is of the format "<coeff> * <pauli_string>".
 
     Returns:
-    A float representing the accuracy score for the given noise model and seed.
+    A list of tuples representing a list of the Pauli coefficients and strings.
+    Each tuple is of the form (<coeff>, <pauli_string>), where <coeff> is a
+    floating point number representing the coefficient, and <pauli_string> is
+    a string of length 27 for a circuit with 27 physical qubits.
     """
 
-    # Set the seed used throughout the workflow.
-    seed = seed
-    algorithm_globals.random_seed = seed
-    seed_transpiler = seed
+    # Initializing the list to hold the parsed Pauli operators and their coefficients
+    pauli_list = []
 
-    # Set the number of shots used throughout the workflow.
-    shots = 2852
+    # Splitting the content into lines and parsing each line
+    for line in content.splitlines():
+        # Removing the '+' symbol and splitting each line into coefficient and operator parts
+        parts = line.replace('+', '').replace('- ', '-').split(' * ')
 
-    # Sets the noise model name, which is used for saving a QASM file
-    # in the current working directory.
-    noisemodel_name = noisemodel_name
+        # If the line is correctly formatted, it should have exactly two parts
+        if len(parts) == 2:
+            try:
+                # The first part is the coefficient
+                coefficient = float(parts[0])
+                # The second part is the operator string
+                # Prepend 15 I's to fit to FakeMontreal hardware backend
+                operator = "I" * 15 + parts[1]
 
-    # Set the noise model used in the workflow.
-    noisemodel_path = './NoiseModel/' + noisemodel_name + '.pkl'
+                # Appending the parsed operator and coefficient to the list
+                pauli_list.append((operator, coefficient))
+            except ValueError:  # Handle lines that cannot be parsed correctly
+                print('Error: cannot parse this Pauli string:', parts)
 
-    # Sets the hamiltonian used in the workflow.
-    hamiltonian_file_path = './Hamiltonian/OHhamiltonian.txt'
+    return pauli_list
 
-    """## Generate Hamiltonian and Pauli String
+def obtain_qmolecule():
+    """
+    ## Generate Hamiltonian and Pauli String
 
     The code sets up PySCF to generate the hamiltonian of the hydroxyl cation with the basis function as 'sto3g' to fit the spin orbital, and then uses the JordanWignerMapper to map the Fermionic terms to Pauli strings.
 
@@ -133,6 +145,9 @@ def performWorkflow(noisemodel_name, seed):
     # Convert the second quantized operator (second_q_op) to a qubit operator (qubit_op).
     qubit_op = converter.convert(second_q_op)
 
+    return qmolecule
+
+def obtain_ref_energy(qmolecule):
     """## Obtain Reference Energy using Classical Simulation
     We use the classical minimum eigensolver to obtain a reference energy of the hydroxyl radical.
     """
@@ -161,9 +176,10 @@ def performWorkflow(noisemodel_name, seed):
     # print(qmolecule.num_particles)
     # print(mapper)
 
-    """## Construct Ansatz using VQE and Circuit Synthesis
-    At this step, we first perform VQE on the UCCSD ansatz to obtain a parameterized circuit. We then transpile the circuit so it has one and two qubit gates, and proceed to circuit synthesis with BQSKit.
+    return ref_value_float
 
+def obtain_parameterized_ansatz(qmolecule, seed, shots, seed_transpiler):
+    """
     ### Obtain parameterized UCCSD Ansatz using VQE
     This step of the code obtains the parameterized UCCSD ansatz by running VQE.
     """
@@ -173,11 +189,11 @@ def performWorkflow(noisemodel_name, seed):
     ansatz = UCCSD(
         qmolecule.num_spatial_orbitals,
         qmolecule.num_particles,
-        mapper,
+        JordanWignerMapper(),
         initial_state=HartreeFock(
             qmolecule.num_spatial_orbitals,
             qmolecule.num_particles,
-            mapper,
+            JordanWignerMapper(),
         ),
     )
 
@@ -207,7 +223,7 @@ def performWorkflow(noisemodel_name, seed):
     # and optimizes the parameters for the UCCSD ansatz
     # through VQE.
     start_time = time.time()
-    calc = GroundStateEigensolver(mapper, vqe_solver)
+    calc = GroundStateEigensolver(JordanWignerMapper(), vqe_solver)
     res = calc.solve(qmolecule)
     end_time = time.time()
     # print(res)
@@ -220,6 +236,9 @@ def performWorkflow(noisemodel_name, seed):
     optimized_ansatz = vqe_solver.ansatz.bind_parameters(optimal_point)
     optimized_ansatz_qasm = optimized_ansatz.qasm()
 
+    return optimized_ansatz_qasm
+
+def compile_circ_bqskit(optimized_ansatz_qasm, seed, noisemodel_name):
     """### Transpile the Parameterized UCCSD ansatz and perform circuit synthesis using BQSKit
     We then transpile the parameterized UCCSD ansatz on Qiskit's QASM simulator to obtain a circuit with one and two qubit gates, and then perform BQSKit with an optimization level of 3 (for fine-tuning of gate parameters).
     """
@@ -252,64 +271,17 @@ def performWorkflow(noisemodel_name, seed):
 
     # print(compiled_circuit.depth)
 
-    """## Circuit Evaluation
-    We now evaluate the circuit with the provided Hamiltonian and use Qiskit's Estimator to estimate the ground state energy.
-    """
+    return compiled_circuit
 
+def evaluate_circuit(transpiled_circuit_montreal, hamiltonian_file_path, noisemodel_path, shots, seed, qmolecule, ref_value_float):
     # Read in the Hamiltonian as a string.
     with open(hamiltonian_file_path, 'r') as file:
         hamiltonian_str = file.read()
-
-    # Define a function for parsing the Hamiltonian string into a list of
-    # Pauli strings.
-    def parse_hamiltonian(content: str):
-        """
-        Parses the input Hamiltonian string and returns a list of Pauli strings
-        padded for a circuit with 27 qubits with their coefficients.
-
-        Args:
-        content (str): The string representation of the Hamiltonian to parse.
-        It is assumed that the file contains one Pauli coefficient and string per
-        line, and each line is of the format "<coeff> * <pauli_string>".
-
-        Returns:
-        A list of tuples representing a list of the Pauli coefficients and strings.
-        Each tuple is of the form (<coeff>, <pauli_string>), where <coeff> is a
-        floating point number representing the coefficient, and <pauli_string> is
-        a string of length 27 for a circuit with 27 physical qubits.
-        """
-
-        # Initializing the list to hold the parsed Pauli operators and their coefficients
-        pauli_list = []
-
-        # Splitting the content into lines and parsing each line
-        for line in content.splitlines():
-            # Removing the '+' symbol and splitting each line into coefficient and operator parts
-            parts = line.replace('+', '').replace('- ', '-').split(' * ')
-
-            # If the line is correctly formatted, it should have exactly two parts
-            if len(parts) == 2:
-                try:
-                    # The first part is the coefficient
-                    coefficient = float(parts[0])
-                    # The second part is the operator string
-                    # Prepend 15 I's to fit to FakeMontreal hardware backend
-                    operator = "I" * 15 + parts[1]
-
-                    # Appending the parsed operator and coefficient to the list
-                    pauli_list.append((operator, coefficient))
-                except ValueError:  # Handle lines that cannot be parsed correctly
-                    print('Error: cannot parse this Pauli string:', parts)
-
-        return pauli_list
 
     # Obtain the observable as a Sparse Pauli Operator
     observable = SparsePauliOp.from_list(parse_hamiltonian(hamiltonian_str))
     print(len(observable))
     print(f">>> Observable: {observable.paulis}")
-
-    # Initialize the system model
-    system_model = FakeMontreal()
 
     # Read in the noise model
     with open(noisemodel_path, 'rb') as file:
@@ -322,20 +294,6 @@ def performWorkflow(noisemodel_name, seed):
     noise_modelreal = noise_model1.from_dict(noise_model)
 
     # noise_modelreal
-
-    # Obtain a Qiskit representation of the BQSKit compiled circuit
-    compiled_circ_qiskit = QuantumCircuit.from_qasm_str(compiled_circuit.to('qasm'))
-
-    # compiled_circ_qiskit.draw()
-
-    # Specify a layout for the transpiler onto the system model.
-    # Map the first 12 logical qubits to the first 12 physical qubits.
-    layout = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
-
-    # Transpile the circuit with the above layout on the system model.
-    transpiled_circuit_montreal = transpile(compiled_circ_qiskit, backend=system_model, seed_transpiler=seed, initial_layout=layout)
-
-    # transpiled_circuit_montreal.draw()
 
     # Create an estimator for the ground state energy, using the specified shots
     # and the noise model.
@@ -373,6 +331,73 @@ def performWorkflow(noisemodel_name, seed):
     accuracy_score = (1 - abs((result_energy - ref_value_float) / ref_value_float)) * 100
     print("Accuracy Score: %f%%" % (accuracy_score))
 
+    return accuracy_score
+
+def perform_workflow(noisemodel_name, seed, shots=2852):
+    """
+    Performs the entire circuit generation and synthesis workflow for a given
+    noise model and seed.
+
+    Args:
+    noisemodel_name (str): The name of the noise model to use when evaluating
+    the resulting ansatz. noisemodel_name MUST be one of 'fakecairo.pkl', 'fakekolkata.pkl',
+    and 'fakemontreal.pkl'.
+    seed (int): The seed to use throughout the workflow.
+    shots (int): The number of shots to use throughout the workflow. Default is 2852.
+
+    Returns:
+    A float representing the accuracy score for the given noise model and seed.
+    """
+
+    # Set the seed used throughout the workflow.
+    seed = seed
+    algorithm_globals.random_seed = seed
+    seed_transpiler = seed
+
+    # Set the number of shots used throughout the workflow.
+    shots = shots
+
+    # Sets the noise model name, which is used for saving a QASM file
+    # in the current working directory.
+    noisemodel_name = noisemodel_name
+
+    # Set the noise model used in the workflow.
+    noisemodel_path = './NoiseModel/' + noisemodel_name + '.pkl'
+
+    # Sets the hamiltonian used in the workflow.
+    hamiltonian_file_path = './Hamiltonian/OHhamiltonian.txt'
+
+    qmolecule = obtain_qmolecule()
+
+    ref_value_float = obtain_ref_energy(qmolecule)
+
+    """## Construct Ansatz using VQE and Circuit Synthesis
+    At this step, we first perform VQE on the UCCSD ansatz to obtain a parameterized circuit. We then transpile the circuit so it has one and two qubit gates, and proceed to circuit synthesis with BQSKit.
+    """
+
+    optimized_ansatz_qasm = obtain_parameterized_ansatz(qmolecule, seed, shots, seed_transpiler)
+
+    compiled_circuit = compile_circ_bqskit(optimized_ansatz_qasm, seed, noisemodel_name)
+
+    """## Circuit Evaluation
+    We now evaluate the circuit with the provided Hamiltonian and use Qiskit's Estimator to estimate the ground state energy.
+    """
+
+    # Initialize the system model
+    system_model = FakeMontreal()
+
+    # Obtain a Qiskit representation of the BQSKit compiled circuit
+    compiled_circ_qiskit = QuantumCircuit.from_qasm_str(compiled_circuit.to('qasm'))
+
+    # compiled_circ_qiskit.draw()
+
+    layout = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+
+    # Transpile the circuit with the above layout on the system model.
+    transpiled_circuit_montreal = transpile(compiled_circ_qiskit, backend=system_model, seed_transpiler=seed, initial_layout=layout)
+
+    accuracy_score = evaluate_circuit(transpiled_circuit_montreal, hamiltonian_file_path, noisemodel_path, shots, seed, qmolecule, ref_value_float)
+
     """### Obtain the Duration of the Final Circuit
     Here, we use the 'pulse' module from Qiskit to obtain the duration of the
     quantum circuit in terms of the time resolution of the system model.
@@ -387,8 +412,10 @@ def performWorkflow(noisemodel_name, seed):
             pulse.call(transpiled_circuit_montreal)
 
     # Print the duration of the quantum circuit
-    my_program1.duration
+    print(my_program1.duration)
 
     # Print the final transpiled circuit.
-    transpiled_circuit_montreal.qasm()
+    print(transpiled_circuit_montreal.qasm())
+
+    return accuracy_score
 
