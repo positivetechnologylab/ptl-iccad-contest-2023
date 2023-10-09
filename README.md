@@ -31,4 +31,4 @@ We'd like to note that our Python workflow incorporates the Qiskit estimator for
 If you would like to customize the workflow, the `iccad_prod_workflow_doc.py` files provides Python functions that break down parts of the workflow and can be modified to suit your needs. In particular, `obtain_parameterized_ansatz` runs VQE and returns the parameterized UCCSD ansatz, `compile_circ_bqskit` compiles an input circuit using our BQSKit workflow, and `evaluate_circuit` uses the Qiskit Estimator class to evaluate a transpiled circuit on the FakeMontreal() backend.
 
 ## Copyright
-© 2023 Positive Technology Lab. All rights reserved. For permissions, contact ptl@rice.edu.
+Copyright © 2023 Positive Technology Lab. All rights reserved. For permissions, contact ptl@rice.edu.
