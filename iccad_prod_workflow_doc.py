@@ -349,6 +349,8 @@ def perform_workflow(noisemodel_name, seed, shots=2852):
     A float representing the accuracy score for the given noise model and seed.
     """
 
+    print(f"perform_workflow called with: noisemodel_name: {noisemodel_name}, seed: {seed}, shots: {shots}")
+
     # Set the seed used throughout the workflow.
     seed = seed
     algorithm_globals.random_seed = seed
