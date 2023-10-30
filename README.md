@@ -1,6 +1,8 @@
 # Generating Low-Depth Quantum Variational Circuits for the Hydroxyl Cation to Attain High Fidelity on NISQ Computers
 
-This is the Positive Technology Lab at Rice University's submission for the [2023 Quantum Computing for Drug Discovery Challenge at ICCAD](https://qccontest.github.io/QC-Contest/index.html).
+This is the Positive Technology Lab at Rice University's submission for the [2023 ACM/IEEE Quantum Computing for Drug Discovery Challenge at ICCAD](https://qccontest.github.io/QC-Contest/index.html).
+
+***Our solution received an Honorable Mention for its performance as one of the top 6 out of 73 submissions. It was also a finalist for the Innovation Award.***
 
 ## Usage
 1. In your terminal, run `git clone https://github.com/positivetechnologylab/ptl-iccad-contest-2023.git` to clone the repository.
